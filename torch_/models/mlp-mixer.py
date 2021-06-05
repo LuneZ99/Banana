@@ -1,17 +1,27 @@
 import torch
-import numpy as np
 import torch.nn as nn
 
 from functools import partial
 from einops.layers.torch import Rearrange, Reduce
 
 
-# 继承式实现
+# 继承式实现, by lune
 
 
-class TokenMixer(nn.Module):
+class TokenMixing(nn.Module):
+    """
+        TokenMixing.
+
+        input:  2d-batched_tensor (b, t, c)
+                  ↓
+                b t c
+                b h c
+                b t c
+                  ↓
+        output: 2d-batched_tensor (b, t, c)
+    """
     def __init__(self, dim_norm, dim, expansion_factor=4, dropout=0.):
-        super(TokenMixer, self).__init__()
+        super(TokenMixing, self).__init__()
         self.block = nn.Sequential(
             nn.Conv1d(dim, dim * expansion_factor, kernel_size=1),
             nn.GELU(),
@@ -25,9 +35,20 @@ class TokenMixer(nn.Module):
         return self.block(self.norm(x)) + x
 
 
-class ChannelMixer(nn.Module):
+class ChannelMixing(nn.Module):
+    """
+        ChannelMixing.
+
+        input:  2d-batched_tensor (b, t, c)
+                    ↓
+                b t c
+                b t h
+                b t c
+                    ↓
+        output: 2d-batched_tensor (b, t, c)
+    """
     def __init__(self, dim_norm, dim, expansion_factor=4, dropout=0.):
-        super(ChannelMixer, self).__init__()
+        super(ChannelMixing, self).__init__()
         self.block = nn.Sequential(
             nn.Linear(dim, dim * expansion_factor),
             nn.GELU(),
@@ -42,7 +63,20 @@ class ChannelMixer(nn.Module):
 
 
 class MLPMixer(nn.Module):
-    def __init__(self, image_size, channels, patch_size, hidden_dim, num_block, num_classes, expansion_factor=4, dropout=0.):
+    """
+        MLPMixer.
+
+        input:  3d-batched_tensor (b, c, h, w)
+            -> Rearrange                            (b, h_i*w_i, p_h*p_w*c)
+            -> Linear(p_h*p_w*c, hidden_dim)        (b, h_i*w_i, hidden_dim)
+            -> [TM, CM, TM, CM, ...(num_blocks*2)]  (b, h_i*w_i, hidden_dim)
+            -> LayerNorm(1, 2)                      (b, h_i*w_i, hidden_dim)
+            -> Reduce(1)                            (b, hidden_dim)
+            -> Linear_output                        (b, num_classes)
+        output: 1d-batched_tensor (b, num_classes)
+    """
+    def __init__(self, image_size, channels, patch_size, hidden_dim,
+                 num_block, num_classes, expansion_factor=4, dropout=0.):
         super(MLPMixer, self).__init__()
         num_patches = (image_size // patch_size) ** 2   # tokens_mlp_dim
         self.num_blocks = num_block
@@ -52,8 +86,8 @@ class MLPMixer(nn.Module):
         self.mixer_blocks = nn.ModuleList(
             [
                 nn.Sequential(
-                    TokenMixer(hidden_dim, num_patches, expansion_factor, dropout),
-                    ChannelMixer(hidden_dim, hidden_dim, expansion_factor, dropout)
+                    TokenMixing(hidden_dim, num_patches, expansion_factor, dropout),
+                    ChannelMixing(hidden_dim, hidden_dim, expansion_factor, dropout)
                 )
                 for _ in range(self.num_blocks)
             ]
@@ -137,6 +171,5 @@ if __name__ == '__main__':
 
     print(mlp_mixer(img).argmax().item())
     print(mlp_mixer2(img).argmax().item())
-
 
 
